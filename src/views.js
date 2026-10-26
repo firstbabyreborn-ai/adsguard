@@ -214,6 +214,29 @@ ${watchlist.length ? `<div class="card"><h2>Manage watchpoints</h2><table><tbody
 
 /* ------------------------------ onboarding ------------------------------ */
 
+
+/**
+ * Shown when a browser opens /app with no session — usually someone typing the
+ * URL by hand instead of opening the app from the Shopify admin.
+ */
+export function signin({ host = '' } = {}) {
+  return page('AdsGuard — open from Shopify', `
+    <main style="max-width:640px;margin:12vh auto;padding:0 24px;text-align:center">
+      <div style="font-size:34px;letter-spacing:-.02em;font-weight:700;margin-bottom:14px">Open AdsGuard from your Shopify admin</div>
+      <p style="color:var(--muted);font-size:16px;line-height:1.6;margin-bottom:28px">
+        This dashboard is per-store. Shopify tells us which store you are opening it for,
+        and that handshake only happens from inside the admin — not from a typed URL.
+      </p>
+      <a class="btn" style="display:inline-block;padding:14px 26px;font-size:15px"
+         href="/auth?shop=YOUR-STORE.myshopify.com">Install / open with your store</a>
+      <p style="color:var(--muted);font-size:13px;margin-top:26px">
+        Replace <code>YOUR-STORE</code> in the link with your store's handle.
+        Need help? <a href="mailto:alerts@adsguard.app">alerts@adsguard.app</a>
+      </p>
+    </main>
+  `);
+}
+
 export function setup({ shop, csrf, plan, notice = null }) {
   return shell({
     title: 'AdsGuard setup', shop, body: `
@@ -353,4 +376,4 @@ third parties.</p>
   });
 }
 
-export default { dashboard, setup, landing, pricing, privacy, terms };
+export default { dashboard, setup, signin, landing, pricing, privacy, terms };

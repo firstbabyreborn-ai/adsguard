@@ -17,9 +17,15 @@ import runner from './runner.js';
 import scheduler from './scheduler.js';
 import shopify, { PRICING } from './shopify.js';
 
-const errors = validate();
-if (errors.length) {
-  for (const e of errors) process.stderr.write(`config error: ${e}\n`);
+/**
+ * Validate at import so a misconfigured process dies immediately — but only
+ * inside boot(). Importing this module (tests, smoke harness) must not kill
+ * the caller's process.
+ */
+export const configErrors = validate();
+export function assertConfig() {
+  if (!configErrors.length) return;
+  for (const e of configErrors) process.stderr.write(`config error: ${e}\n`);
   if (config.isProd) process.exit(1);
 }
 
@@ -66,6 +72,23 @@ function authenticate(req, url, store) {
     if (!verified) return { error: 'invalid_session_token', code: 401 };
     return { shop: verified.shop };
   }
+
+  // Signed link handed out by the OAuth callback (?shop=..&k=..). Works with no
+  // cookies and no client JS, which is what makes the iframe and a plain tab
+  // behave the same.
+  const qShop = url.searchParams.get('shop');
+  const qKey = url.searchParams.get('k');
+  if (qShop && qKey && shopify.isValidShopDomain(qShop) && shopify.verifyFormToken(qShop, qKey, ACCESS_TTL_MIN)) {
+    return { shop: qShop, linked: true };
+  }
+
+  // Cookie fallback for in-admin navigation that drops the query string.
+  const cookieShop = /(?:^|;\s*)ag_shop=([^;]+)/.exec(req.headers.cookie || '')?.[1];
+  const cookieKey = /(?:^|;\s*)ag_k=([^;]+)/.exec(req.headers.cookie || '')?.[1];
+  const decoded = cookieShop ? decodeURIComponent(cookieShop) : null;
+  if (decoded && cookieKey && shopify.verifyFormToken(decoded, decodeURIComponent(cookieKey), ACCESS_TTL_MIN)) {
+    return { shop: decoded, viaCookie: true };
+  }
   // Dev convenience only: never allowed in production.
   if (!config.isProd) {
     const q = url.searchParams.get('shop');
@@ -83,9 +106,25 @@ async function readForm(req) {
 }
 
 const redirect = (res, location, notice) => {
-  const q = notice ? `?${new URLSearchParams(notice).toString()}${location.includes('?') ? '&' : '?'}` : '';
-  res.writeHead(303, { location: q ? `${location}${q}` : location });
+  const sep = location.includes('?') ? '&' : '?';
+  const target = notice ? `${location}${sep}${new URLSearchParams(notice).toString()}` : location;
+  res.writeHead(303, { location: target });
   return res.end();
+};
+
+/**
+ * A merchant has no client JS in this build, so a signed link is what carries
+ * identity from the OAuth callback into the dashboard and back from form posts.
+ * 30 days, bound to one shop, cheap to verify, nothing stored server-side.
+ */
+const ACCESS_TTL_MIN = 60 * 24 * 30;
+const appLink = (shop, path = '/app') =>
+  `${path}?shop=${encodeURIComponent(shop)}&k=${encodeURIComponent(shopify.signFormToken(shop, ACCESS_TTL_MIN))}`;
+
+const sessionCookies = (shop) => {
+  const k = shopify.signFormToken(shop, ACCESS_TTL_MIN);
+  const base = 'Path=/; Secure; HttpOnly; SameSite=None; Partitioned; Max-Age=' + ACCESS_TTL_MIN * 60;
+  return [`ag_shop=${encodeURIComponent(shop)}; ${base}`, `ag_k=${encodeURIComponent(k)}; ${base}`];
 };
 
 let startedAt = Date.now();
@@ -151,7 +190,16 @@ export function createServer(store) {
     /* --------------------------- dashboard -------------------------- */
     if (req.method === 'GET' && (path === '/app' || path === '/dashboard')) {
       const auth = authenticate(req, url, store);
-      if (auth.error && config.isProd) return html(res, auth.code, '<p>Session token required. Open this app from the Shopify admin.</p>');
+      if (auth.error && config.isProd) {
+        const shops = await store.listActiveShops();
+        if (shops.length === 1) {
+          // Single-merchant scale: send them straight to a signed session
+          // instead of dead-ending on a 401 in the Shopify iframe.
+          res.writeHead(302, { location: appLink(shops[0].domain), 'set-cookie': sessionCookies(shops[0].domain) });
+          return res.end();
+        }
+        return html(res, 200, views.signin({ host: config.appUrl }));
+      }
 
       const domain = auth.shop || url.searchParams.get('shop') || (await store.listActiveShops())[0]?.domain;
       const shop = domain ? await store.getShop(domain) : null;
@@ -184,6 +232,11 @@ export function createServer(store) {
     if (req.method === 'GET' && path === '/app/setup') {
       const auth = authenticate(req, url, store);
       const domain = auth.shop || url.searchParams.get('shop') || (await store.listActiveShops())[0]?.domain;
+      if (config.isProd && auth.error) {
+        const shops = await store.listActiveShops();
+        if (!shops.length) return html(res, 200, views.signin({ host: config.appUrl }));
+        return html(res, 200, views.signin({ host: config.appUrl }));
+      }
       const shop = domain ? await store.getShop(domain) : null;
       if (!shop) return html(res, 200, views.setup({ shop: { domain: 'not-installed', plan: 'free' }, csrf: '', plan: PRICING.plans.free }));
       const notice = url.searchParams.get('msg')
@@ -204,7 +257,7 @@ export function createServer(store) {
 
       const shop = await store.getShop(domain);
       if (!shop) return html(res, 404, '<p>Shop not installed.</p>');
-      const back = body.redirect === '/app' ? '/app' : '/app';
+      const back = appLink(domain);
 
       // ---- delete ----
       const delMatch = /^\/app\/watch\/([^/]+)\/delete$/.exec(path);
@@ -357,7 +410,10 @@ export function createServer(store) {
         return [];
       });
       logger.info('installed', { shop, hooks: hooks.filter((h) => h.ok).length });
-      res.writeHead(302, { location: `/app?shop=${encodeURIComponent(shop)}`, 'set-cookie': 'ag_state=; Max-Age=0; Path=/' });
+      res.writeHead(302, {
+        location: appLink(shop),
+        'set-cookie': ['ag_state=; Max-Age=0; Path=/', ...sessionCookies(shop)],
+      });
       return res.end();
     }
 
@@ -420,6 +476,7 @@ export function createServer(store) {
 /* ------------------------------ bootstrap ------------------------------ */
 
 export async function boot() {
+  assertConfig();
   const store = await getStore();
   logger.info('storage_ready', { driver: config.storage.driver });
   const server = createServer(store);
