@@ -1,0 +1,36 @@
+# Local production-parity stack: app + Postgres.
+#   docker compose up --build
+#   open http://localhost:3000
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: pg
+      POSTGRES_DB: adsguard
+    ports: ['5432:5432']
+    volumes: ['pgdata:/var/lib/postgresql/data']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d adsguard']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: '3000'
+      STORAGE_DRIVER: pg
+      DATABASE_URL: postgres://postgres:pg@db:5432/adsguard?sslmode=disable
+      APP_URL: http://localhost:3000
+      SHOPIFY_API_KEY: ${SHOPIFY_API_KEY:-dev_key}
+      SHOPIFY_API_SECRET: ${SHOPIFY_API_SECRET:-dev_secret_value_long_enough_1234}
+      SCHEDULER_ENABLED: 'true'
+      LOG_LEVEL: debug
+    ports: ['3000:3000']
+
+volumes:
+  pgdata:

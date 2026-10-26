@@ -1,0 +1,21 @@
+{
+  "name": "adsguard",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "AdsGuard — paid-traffic protection for Shopify stores. Tells you the money at risk when a page you are paying for breaks.",
+  "engines": { "node": ">=20.11" },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "demo": "node scripts/seed.js && node src/server.js",
+    "seed": "node scripts/seed.js",
+    "migrate": "node scripts/migrate.js",
+    "test": "node --test test/",
+    "lint": "node --check src/server.js && node --check src/runner.js && node --check src/checks.js",
+    "smoke": "node scripts/smoke.js"
+  },
+  "optionalDependencies": {
+    "pg": "^8.13.1"
+  }
+}
