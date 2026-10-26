@@ -220,21 +220,25 @@ ${watchlist.length ? `<div class="card"><h2>Manage watchpoints</h2><table><tbody
  * URL by hand instead of opening the app from the Shopify admin.
  */
 export function signin({ host = '' } = {}) {
-  return page('AdsGuard — open from Shopify', `
-    <main style="max-width:640px;margin:12vh auto;padding:0 24px;text-align:center">
-      <div style="font-size:34px;letter-spacing:-.02em;font-weight:700;margin-bottom:14px">Open AdsGuard from your Shopify admin</div>
-      <p style="color:var(--muted);font-size:16px;line-height:1.6;margin-bottom:28px">
-        This dashboard is per-store. Shopify tells us which store you are opening it for,
-        and that handshake only happens from inside the admin — not from a typed URL.
-      </p>
-      <a class="btn" style="display:inline-block;padding:14px 26px;font-size:15px"
-         href="/auth?shop=YOUR-STORE.myshopify.com">Install / open with your store</a>
-      <p style="color:var(--muted);font-size:13px;margin-top:26px">
-        Replace <code>YOUR-STORE</code> in the link with your store's handle.
-        Need help? <a href="mailto:alerts@adsguard.app">alerts@adsguard.app</a>
-      </p>
-    </main>
-  `);
+  return shell({
+    title: 'AdsGuard — open from Shopify',
+    shop: { domain: 'no store connected yet', plan: 'free' },
+    body: `
+<main style="max-width:620px;margin:8vh auto 0;text-align:center">
+  <h2 style="font-size:28px;letter-spacing:-.02em;margin:0 0 14px">Open AdsGuard from your Shopify admin</h2>
+  <p style="color:#8b98a5;font-size:15px;line-height:1.65;margin:0 0 26px">
+    This dashboard belongs to one store. Shopify tells us which store is opening it,
+    and that handshake only happens from inside the admin or from your install link.
+  </p>
+  <p style="font-size:15px;margin:0 0 8px">Your install / open link:</p>
+  <div class="mono" style="background:#111820;border:1px solid #1e2a36;border-radius:10px;padding:14px;font-size:13px;word-break:break-all">
+    ${esc(host.replace(/\/$/, ''))}/auth?shop=<span style="color:#7dd3fc">YOUR-STORE</span>.myshopify.com
+  </div>
+  <p style="color:#8b98a5;font-size:13px;margin-top:22px">
+    Replace <code>YOUR-STORE</code> with your store handle, e.g. <code>adsguard-dev</code>.
+  </p>
+</main>`,
+  });
 }
 
 export function setup({ shop, csrf, plan, notice = null }) {
